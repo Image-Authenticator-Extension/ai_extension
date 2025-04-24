@@ -1,0 +1,14 @@
+body {
+  font-family: Arial, sans-serif;
+  width: 300px;
+  padding: 10px;
+}
+img {
+  display: block;
+  margin-bottom: 10px;
+  border-radius: 8px;
+}
+p {
+  font-size: 14px;
+  font-weight: bold;
+}
