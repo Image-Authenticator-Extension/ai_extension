@@ -8,12 +8,12 @@ from transformers import ViTForImageClassification, ViTImageProcessor
 
 # Load model and processor
 model = ViTForImageClassification.from_pretrained(
-    "new_model/New_Model",
+    "Recent_Trained_Model",
     local_files_only=True,
     trust_remote_code=True
 )
 
-processor = ViTImageProcessor.from_pretrained("new_model/New_Model")
+processor = ViTImageProcessor.from_pretrained("Recent_Trained_Model")
 
 model.eval()  # Set model to evaluation mode
 
