@@ -14,53 +14,26 @@ function toDataURL(url, callback) {
 
 const loggedImages = new Set();
 
-function extractImageURL(img) {
-    if (img.src) return img.src;
-    const srcset = img.getAttribute('srcset');
+function extractImageURL(el) {
+    if (el.tagName === 'IMG' && el.src) return el.src;
+
+    const srcset = el.getAttribute?.('srcset');
     if (srcset) {
         const parts = srcset.split(',');
         const last = parts[parts.length - 1].trim();
         return last.split(' ')[0];
     }
-    const styleBg = window.getComputedStyle(img).backgroundImage;
-    if (styleBg && styleBg !== 'none') {
-        return styleBg.slice(5, -2); // remove `url("...")`
+
+    const styleBg = window.getComputedStyle(el).backgroundImage;
+    if (styleBg && styleBg !== 'none' && styleBg.includes('url')) {
+        return styleBg.slice(5, -2);
     }
+
     return null;
 }
 
-function processImage(img) {
-    const imgUrl = extractImageURL(img);
-    if (!imgUrl || loggedImages.has(imgUrl)) return;
-
-    loggedImages.add(imgUrl);
-    console.log('🖼️ Logging Image URL:', imgUrl);
-
-    toDataURL(imgUrl, function (base64Data) {
-        fetch("http://127.0.0.1:5000/predict", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ image: base64Data })
-        })
-            .then(response => response.json())
-            .then(data => {
-                let finalPrediction = data.prediction;
-                if (data.confidence < 0.5) {
-                    finalPrediction = "AI-generated";
-                }
-
-                console.log("✅ Prediction:", finalPrediction, `(Confidence: ${data.confidence.toFixed(2)})`);
-                showOverlay(img, finalPrediction, data.confidence);
-            })
-            .catch(error => {
-                console.error("❌ Prediction error:", error);
-            });
-    });
-}
-
-function showOverlay(img, prediction, confidence) {
-    const existingLabel = img.parentElement.querySelector('.ai-label-overlay');
-    if (existingLabel) return;
+function showOverlay(el, prediction, confidence) {
+    removeOverlay(el); // Ensure no duplicate
 
     const label = document.createElement('div');
     label.className = 'ai-label-overlay';
@@ -81,30 +54,113 @@ function showOverlay(img, prediction, confidence) {
         fontFamily: 'Arial, sans-serif'
     });
 
-    const parent = img.parentElement;
-    parent.style.position = 'relative';
-    parent.appendChild(label);
+    el.style.position = 'relative';
+    el.appendChild(label);
 }
 
-document.addEventListener('mouseover', function (e) {
-    const img = e.target.closest('img');
-    if (img) {
-        processImage(img);
-    }
-});
+function removeOverlay(el) {
+    const existing = el.querySelector('.ai-label-overlay');
+    if (existing) existing.remove();
+}
 
-// 👁️‍🗨️ Observe DOM changes (important for dynamic sites like Instagram)
+function findImageInNested(el) {
+    if (!el || el.tagName === 'SCRIPT' || el.tagName === 'STYLE') return null;
+
+    let imgUrl = extractImageURL(el);
+    if (imgUrl) return { el, imgUrl };
+
+    for (const child of el.querySelectorAll('*')) {
+        const childUrl = extractImageURL(child);
+        if (childUrl) return { el: child, imgUrl: childUrl };
+    }
+
+    return null;
+}
+
+function processImage(targetEl, imgUrl) {
+    if (!imgUrl) return;
+
+    const container = targetEl.closest('article, div[class*="post"], div[class*="container"], div') || targetEl.parentElement;
+
+    if (loggedImages.has(imgUrl)) {
+        const existing = container.dataset.prediction;
+        const conf = parseFloat(container.dataset.confidence);
+        if (existing) {
+            console.log(`🟡 [HOVER AGAIN] Image: ${imgUrl}`);
+            console.log(`   → Prediction: ${existing}`);
+            console.log(`   → Confidence: ${(conf * 100).toFixed(2)}%`);
+            showOverlay(container, existing, conf);
+        }
+        return;
+    }
+
+    toDataURL(imgUrl, function (base64Data) {
+        fetch("http://127.0.0.1:5000/predict", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ image: base64Data })
+        })
+        .then(response => response.json())
+        .then(data => {
+            let finalPrediction = data.prediction === "Real" ? "AI-generated" : "Real";
+if (data.confidence < 0.5) {
+    finalPrediction = "AI-generated"; // Or choose a fallback
+}
+
+
+            container.dataset.prediction = finalPrediction;
+            container.dataset.confidence = data.confidence;
+            loggedImages.add(imgUrl);
+
+            console.log(`🧠 [PREDICTED] Image: ${imgUrl}`);
+            console.log(`   → Prediction: ${finalPrediction}`);
+            console.log(`   → Confidence: ${(data.confidence * 100).toFixed(2)}%`);
+
+            showOverlay(container, finalPrediction, data.confidence);
+        })
+        .catch(error => {
+            console.error("❌ Prediction error:", error);
+        });
+    });
+}
+
+// Hover detection
+// Hover detection
+document.addEventListener('mouseenter', function (e) {
+    const container = e.target.closest('div');
+    if (container) {
+        const result = findImageInNested(container);
+        if (result) {
+            processImage(result.el, result.imgUrl);
+        }
+    }
+}, true); // Use capture phase
+
+// Remove overlay
+document.addEventListener('mouseleave', function (e) {
+    const container = e.target.closest('div');
+    if (container) {
+        removeOverlay(container);
+    }
+}, true);
+
+
+// MutationObserver to support dynamic image posts
 const observer = new MutationObserver(mutations => {
-    mutations.forEach(mutation => {
+    for (const mutation of mutations) {
         mutation.addedNodes.forEach(node => {
             if (node.nodeType === 1) {
                 const imgs = node.querySelectorAll?.('img');
                 imgs?.forEach(img => {
-                    img.addEventListener('mouseover', () => processImage(img));
+                    const url = extractImageURL(img);
+                    if (url && !loggedImages.has(url)) {
+                        img.addEventListener('mouseover', () => processImage(img.parentElement, url));
+                        img.addEventListener('mouseout', () => removeOverlay(img.parentElement));
+                    }
                 });
             }
         });
-    });
+    }
 });
 
 observer.observe(document.body, { childList: true, subtree: true });
