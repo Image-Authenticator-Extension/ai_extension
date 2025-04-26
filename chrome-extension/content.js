@@ -1,10 +1,29 @@
+// Add CSS Styles
+const style = document.createElement("style");
+style.textContent = `
+.ai-label-overlay {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    padding: 4px 8px;
+    font-family: Arial, sans-serif;
+    font-weight: bold;
+    font-size: 12px;
+    color: white;
+    border-radius: 4px;
+    z-index: 9999;
+    pointer-events: none;
+}
+`;
+document.head.appendChild(style);
+
+const predictionCache = new Map();
+
 function toDataURL(url, callback) {
     const xhr = new XMLHttpRequest();
     xhr.onload = function () {
         const reader = new FileReader();
-        reader.onloadend = function () {
-            callback(reader.result);
-        };
+        reader.onloadend = () => callback(reader.result);
         reader.readAsDataURL(xhr.response);
     };
     xhr.open('GET', url);
@@ -12,121 +31,104 @@ function toDataURL(url, callback) {
     xhr.send();
 }
 
-const loggedImages = new Set();
-
 function extractImageURL(el) {
-    if (el.tagName === 'IMG' && el.src) return el.src;
-
-    const srcset = el.getAttribute?.('srcset');
-    if (srcset) {
-        const parts = srcset.split(',');
-        const last = parts[parts.length - 1].trim();
-        return last.split(' ')[0];
+    if (el.tagName === 'IMG') {
+        return el.src || el.getAttribute('data-src');
     }
 
-    const styleBg = window.getComputedStyle(el).backgroundImage;
-    if (styleBg && styleBg !== 'none' && styleBg.includes('url')) {
-        return styleBg.slice(5, -2);
+    const srcset = el.getAttribute?.('srcset') || el.getAttribute?.('data-srcset');
+    if (srcset) {
+        const parts = srcset.split(',').map(s => s.trim());
+        return parts[parts.length - 1].split(' ')[0];
+    }
+
+    const bg = window.getComputedStyle(el).backgroundImage;
+    if (bg && bg.includes('url')) {
+        return bg.slice(5, -2); // remove url("...") wrapper
     }
 
     return null;
-}
-
-function showOverlay(el, prediction, confidence) {
-    removeOverlay(el); // Ensure no duplicate
-
-    const label = document.createElement('div');
-    label.className = 'ai-label-overlay';
-    label.textContent = `🧠 ${prediction} (${(confidence * 100).toFixed(1)}%)`;
-
-    Object.assign(label.style, {
-        position: 'absolute',
-        top: '8px',
-        left: '8px',
-        padding: '4px 8px',
-        backgroundColor: prediction === "AI-generated" ? 'rgba(255, 0, 0, 0.8)' : 'rgba(0, 128, 0, 0.8)',
-        color: 'white',
-        fontSize: '12px',
-        fontWeight: 'bold',
-        borderRadius: '4px',
-        zIndex: 9999,
-        pointerEvents: 'none',
-        fontFamily: 'Arial, sans-serif'
-    });
-
-    el.style.position = 'relative';
-    el.appendChild(label);
 }
 
 function removeOverlay(el) {
-    const existing = el.querySelector('.ai-label-overlay');
-    if (existing) existing.remove();
+    el.querySelector('.ai-label-overlay')?.remove();
+}
+
+function showOverlay(el, prediction, confidence) {
+    removeOverlay(el);
+
+    const label = document.createElement('div');
+    label.className = 'ai-label-overlay';
+
+    const percent = (confidence * 100).toFixed(1);
+    const lowConfidence = prediction === "Real" && confidence >= 0.5 && confidence <= 0.6;
+    label.textContent = lowConfidence ? "Maybe-AI" : `🧠 ${prediction} (${percent}%)`;
+
+    label.style.backgroundColor =
+        prediction === "AI-generated"
+            ? 'rgba(255, 0, 0, 0.8)'
+            : (lowConfidence ? 'rgba(255, 165, 0, 0.8)' : 'rgba(0, 128, 0, 0.8)');
+
+    el.style.position = 'relative';
+    el.insertAdjacentElement('afterbegin', label);
+}
+
+async function fetchPrediction(base64Data) {
+    const response = await fetch("http://127.0.0.1:5000/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: base64Data }),
+    });
+    return response.json();
 }
 
 function findImageInNested(el) {
-    if (!el || el.tagName === 'SCRIPT' || el.tagName === 'STYLE') return null;
+    if (!el || ['SCRIPT', 'STYLE'].includes(el.tagName)) return null;
 
-    let imgUrl = extractImageURL(el);
-    if (imgUrl) return { el, imgUrl };
+    const direct = extractImageURL(el);
+    if (direct) return { el, imgUrl: direct };
 
     for (const child of el.querySelectorAll('*')) {
-        const childUrl = extractImageURL(child);
-        if (childUrl) return { el: child, imgUrl: childUrl };
+        const nested = extractImageURL(child);
+        if (nested) return { el: child, imgUrl: nested };
     }
 
     return null;
 }
 
-function processImage(targetEl, imgUrl) {
+function processImage(el, imgUrl) {
     if (!imgUrl) return;
 
-    const container = targetEl.closest('article, div[class*="post"], div[class*="container"], div') || targetEl.parentElement;
+    const container = el.closest('article, div[class*="post"], div[class*="container"], div') || el.parentElement;
 
-    if (loggedImages.has(imgUrl)) {
-        const existing = container.dataset.prediction;
-        const conf = parseFloat(container.dataset.confidence);
-        if (existing) {
-            console.log(`🟡 [HOVER AGAIN] Image: ${imgUrl}`);
-            console.log(`   → Prediction: ${existing}`);
-            console.log(`   → Confidence: ${(conf * 100).toFixed(2)}%`);
-            showOverlay(container, existing, conf);
-        }
+    if (predictionCache.has(imgUrl)) {
+        const { prediction, confidence } = predictionCache.get(imgUrl);
+        showOverlay(container, prediction, confidence);
         return;
     }
 
-    toDataURL(imgUrl, function (base64Data) {
-        fetch("http://127.0.0.1:5000/predict", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ image: base64Data })
-        })
-        .then(response => response.json())
-        .then(data => {
+    toDataURL(imgUrl, async (base64Data) => {
+        try {
+            const data = await fetchPrediction(base64Data);
+
             let finalPrediction = data.prediction === "Real" ? "AI-generated" : "Real";
-if (data.confidence < 0.5) {
-    finalPrediction = "AI-generated"; // Or choose a fallback
-}
+            if (data.confidence < 0.5) finalPrediction = "AI-generated";
 
+            predictionCache.set(imgUrl, { prediction: finalPrediction, confidence: data.confidence });
 
-            container.dataset.prediction = finalPrediction;
-            container.dataset.confidence = data.confidence;
-            loggedImages.add(imgUrl);
-
-            console.log(`🧠 [PREDICTED] Image: ${imgUrl}`);
-            console.log(`   → Prediction: ${finalPrediction}`);
-            console.log(`   → Confidence: ${(data.confidence * 100).toFixed(2)}%`);
+            console.log(`🧠 [PREDICTED] ${imgUrl}`);
+            console.log(` → Prediction: ${finalPrediction}`);
+            console.log(` → Confidence: ${(data.confidence * 100).toFixed(2)}%`);
 
             showOverlay(container, finalPrediction, data.confidence);
-        })
-        .catch(error => {
-            console.error("❌ Prediction error:", error);
-        });
+        } catch (err) {
+            console.error("❌ Prediction failed:", err);
+        }
     });
 }
 
-// Hover detection
-// Hover detection
-document.addEventListener('mouseenter', function (e) {
+// Hover listeners
+document.addEventListener('mouseenter', (e) => {
     const container = e.target.closest('div');
     if (container) {
         const result = findImageInNested(container);
@@ -134,18 +136,16 @@ document.addEventListener('mouseenter', function (e) {
             processImage(result.el, result.imgUrl);
         }
     }
-}, true); // Use capture phase
+}, true);
 
-// Remove overlay
-document.addEventListener('mouseleave', function (e) {
+document.addEventListener('mouseleave', (e) => {
     const container = e.target.closest('div');
     if (container) {
         removeOverlay(container);
     }
 }, true);
 
-
-// MutationObserver to support dynamic image posts
+// MutationObserver for dynamic content
 const observer = new MutationObserver(mutations => {
     for (const mutation of mutations) {
         mutation.addedNodes.forEach(node => {
@@ -153,9 +153,9 @@ const observer = new MutationObserver(mutations => {
                 const imgs = node.querySelectorAll?.('img');
                 imgs?.forEach(img => {
                     const url = extractImageURL(img);
-                    if (url && !loggedImages.has(url)) {
-                        img.addEventListener('mouseover', () => processImage(img.parentElement, url));
-                        img.addEventListener('mouseout', () => removeOverlay(img.parentElement));
+                    if (url && !predictionCache.has(url)) {
+                        img.addEventListener('mouseover', () => processImage(img, url));
+                        img.addEventListener('mouseout', () => removeOverlay(img));
                     }
                 });
             }
