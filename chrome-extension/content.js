@@ -6,7 +6,7 @@ function resizeAndConvertToBase64(url, callback) {
         reader.onloadend = function () {
             const img = new Image();
             img.onload = function () {
-                const maxDimension = 512; // ✅ Max width/height set karo
+                const maxDimension = 512; //  Max width/height set karo
 
                 let width = img.width;
                 let height = img.height;
@@ -30,7 +30,7 @@ function resizeAndConvertToBase64(url, callback) {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
 
-                const resizedBase64 = canvas.toDataURL('image/jpeg', 0.8); // ✅ Quality compress bhi kar rahe 80%
+                const resizedBase64 = canvas.toDataURL('image/jpeg', 0.8); //  Quality compress bhi kar rahe 80%
                 callback(resizedBase64);
             };
             img.src = reader.result;
