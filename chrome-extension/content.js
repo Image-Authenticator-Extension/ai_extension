@@ -13,11 +13,16 @@ style.textContent = `
     border-radius: 4px;
     z-index: 9999;
     pointer-events: none;
+    btn.style.background = 'none';
+btn.style.border = 'none';
+btn.style.cursor = 'pointer';
+
 }
 `;
 document.head.appendChild(style);
 
 const predictionCache = new Map();
+const inFlightPredictions = new Set();
 
 function toDataURL(url, callback) {
     const xhr = new XMLHttpRequest();
@@ -55,23 +60,57 @@ function removeOverlay(el) {
 }
 
 function showOverlay(el, prediction, confidence) {
-    removeOverlay(el);
+    removeOverlay(el); // avoid duplicates
 
     const label = document.createElement('div');
     label.className = 'ai-label-overlay';
 
-    const percent = (confidence * 100).toFixed(1);
-    const lowConfidence = prediction === "Real" && confidence >= 0.5 && confidence <= 0.6;
-    label.textContent = lowConfidence ? "Maybe-AI" : `🧠 ${prediction} (${percent}%)`;
+    const confPercent = (confidence && !isNaN(confidence)) 
+        ? (confidence * 100).toFixed(1) 
+        : "N/A";
+    
+    const lowConfReal = prediction === "Real" && confidence >= 0.5 && confidence <= 0.6;
+    const labelText = lowConfReal ? `Maybe-AI` : `🧠 ${prediction} (${confPercent}%)`;
 
-    label.style.backgroundColor =
-        prediction === "AI-generated"
-            ? 'rgba(255, 0, 0, 0.8)'
-            : (lowConfidence ? 'rgba(255, 165, 0, 0.8)' : 'rgba(0, 128, 0, 0.8)');
+    label.innerHTML = `
+        <div style="margin-bottom: 4px;">${labelText}</div>
+        <button class="feedback-btn" data-type="correct" title="Prediction Correct">👍</button>
+        <button class="feedback-btn" data-type="incorrect" title="Prediction Wrong">👎</button>
+    `;
+
+    Object.assign(label.style, {
+        position: 'absolute',
+        top: '8px',
+        left: '8px',
+        padding: '6px',
+        backgroundColor: prediction === "AI-generated"
+            ? 'rgba(255, 0, 0, 0.85)'
+            : (lowConfReal ? 'rgba(255, 165, 0, 0.85)' : 'rgba(0, 128, 0, 0.85)'),
+        color: 'white',
+        fontSize: '12px',
+        fontWeight: 'bold',
+        borderRadius: '4px',
+        zIndex: 9999,
+        pointerEvents: 'auto',
+        fontFamily: 'Arial, sans-serif'
+    });
 
     el.style.position = 'relative';
-    el.insertAdjacentElement('afterbegin', label);
+    el.appendChild(label);
+
+    label.querySelectorAll('.feedback-btn').forEach(btn => {
+        btn.style.margin = '2px';
+        btn.style.fontSize = '10px';
+        btn.addEventListener('click', () => {
+            const feedback = btn.dataset.type;
+            const imageUrl = extractImageURL(el);
+            sendFeedback(imageUrl, prediction, confidence, feedback);
+            btn.textContent = '✔️ Sent';
+            btn.disabled = true;
+        });
+    });
 }
+
 
 async function fetchPrediction(base64Data) {
     const response = await fetch("http://127.0.0.1:5000/predict", {
@@ -96,96 +135,61 @@ function findImageInNested(el) {
     return null;
 }
 
-// function processImage(el, imgUrl) {
-//     if (!imgUrl) return;
-
-//     const container = el.closest('article, div[class*="post"], div[class*="container"], div') || el.parentElement;
-
-//     if (predictionCache.has(imgUrl)) {
-//         const { prediction, confidence } = predictionCache.get(imgUrl);
-//         showOverlay(container, prediction, confidence);
-//         return;
-//     }
-
-async function processImageSmart(el, imgUrl) {
-    if (!imgUrl) return;
-
-    const container = el.closest('article, div[class*="post"], div[class*="container"], div') || el.parentElement;
-
-    if (predictionCache.has(imgUrl)) {
-        const { prediction, confidence } = predictionCache.get(imgUrl);
-        showOverlay(container, prediction, confidence);
-        return;
-    }
-
-    try {
-        // 1. Try sending URL directly
-        const response = await fetch("http://127.0.0.1:5000/predict_url", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: imgUrl }),
-        });
-
-        if (!response.ok) throw new Error("URL fetch failed");
-
-        const data = await response.json();
-
-        let finalPrediction = data.prediction === "Real" ? "AI-generated" : "Real";
-        if (data.confidence < 0.5) finalPrediction = "AI-generated";
-
-        predictionCache.set(imgUrl, { prediction: finalPrediction, confidence: data.confidence });
-
-        console.log(` [PREDICTED via URL] ${imgUrl}`);
-        console.log(` → Prediction: ${finalPrediction}`);
-        console.log(` → Confidence: ${(data.confidence * 100).toFixed(2)}%`);
-
-        showOverlay(container, finalPrediction, data.confidence);
-
-    } catch (urlError) {
-        console.warn("⚠️ URL fetch failed, trying base64...", urlError);
-
-        // 2. Fallback to Base64
-        toDataURL(imgUrl, async (base64Data) => {
-            try {
-                const data = await fetchPrediction(base64Data);
-
-                let finalPrediction = data.prediction === "Real" ? "AI-generated" : "Real";
-                if (data.confidence < 0.5) finalPrediction = "AI-generated";
-
-                predictionCache.set(imgUrl, { prediction: finalPrediction, confidence: data.confidence });
-
-                console.log(` [PREDICTED via Base64] ${imgUrl}`);
-                console.log(` → Prediction: ${finalPrediction}`);
-                console.log(` → Confidence: ${(data.confidence * 100).toFixed(2)}%`);
-
-                showOverlay(container, finalPrediction, data.confidence);
-            } catch (base64Error) {
-                console.error(" Prediction failed (Base64 also failed):", base64Error);
+function isLogoImage(imgUrl) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.src = imgUrl;
+        img.onload = () => {
+            const width = img.width;
+            const height = img.height;
+            if (width < 50 || height < 50) {
+                console.log("Logo detected, skipping prediction.");
+                resolve(true);
+            } else {
+                resolve(false);
             }
-        });
-    }
+        };
+        img.onerror = () => resolve(false); // in case image fails to load
+    });
 }
 
+async function processImage(el, imgUrl) {
+    if (!imgUrl || predictionCache.has(imgUrl) || inFlightPredictions.has(imgUrl)) return;
+    // Skip images that are logos
+    const isLogo = await isLogoImage(imgUrl);
+    if (isLogo) return;
+    const container = el.closest('article, div[class*="post"], div[class*="container"], div') || el.parentElement;
+
+    inFlightPredictions.add(imgUrl);
 
     toDataURL(imgUrl, async (base64Data) => {
         try {
             const data = await fetchPrediction(base64Data);
 
-            let finalPrediction = data.prediction === "Real" ? "AI-generated" : "Real";
-            if (data.confidence < 0.5) finalPrediction = "AI-generated";
+            let rawConf = parseFloat(data.confidence);
+            if (isNaN(rawConf)) {
+                inFlightPredictions.delete(imgUrl);
+                return; // ⛔️ Don't show overlay if confidence is invalid
+            }
 
-            predictionCache.set(imgUrl, { prediction: finalPrediction, confidence: data.confidence });
+            let finalPrediction = data.prediction === "Real" ? "AI-generated" : "Real";
+            if (rawConf < 0.5) finalPrediction = "AI-generated";
+
+            predictionCache.set(imgUrl, { prediction: finalPrediction, confidence: rawConf });
+            inFlightPredictions.delete(imgUrl);
 
             console.log(`🧠 [PREDICTED] ${imgUrl}`);
             console.log(` → Prediction: ${finalPrediction}`);
-            console.log(` → Confidence: ${(data.confidence * 100).toFixed(2)}%`);
+            console.log(` → Confidence: ${(rawConf * 100).toFixed(2)}%`);
 
-            showOverlay(container, finalPrediction, data.confidence);
+            showOverlay(container, finalPrediction, rawConf);
         } catch (err) {
             console.error("❌ Prediction failed:", err);
+            inFlightPredictions.delete(imgUrl);
         }
     });
 }
+
 
 // Hover listeners
 document.addEventListener('mouseenter', (e) => {
@@ -193,10 +197,20 @@ document.addEventListener('mouseenter', (e) => {
     if (container) {
         const result = findImageInNested(container);
         if (result) {
-            processImage(result.el, result.imgUrl);
+            const { el, imgUrl } = result;
+
+            // 👉 Check if already cached — show overlay directly
+            if (predictionCache.has(imgUrl)) {
+                const { prediction, confidence } = predictionCache.get(imgUrl);
+                showOverlay(container, prediction, confidence);
+            } else {
+                // ❌ Not in cache — make prediction
+                processImage(el, imgUrl);
+            }
         }
     }
 }, true);
+
 
 document.addEventListener('mouseleave', (e) => {
     const container = e.target.closest('div');
