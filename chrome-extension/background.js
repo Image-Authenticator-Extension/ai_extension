@@ -16,4 +16,5 @@
 //       });
 //   }
 // });
-console.log("helloo");
+console.log("Welcome");
+console.loh("to detect images");
