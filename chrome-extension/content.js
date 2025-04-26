@@ -96,7 +96,18 @@ function findImageInNested(el) {
     return null;
 }
 
-function processImage(el, imgUrl) {
+// function processImage(el, imgUrl) {
+//     if (!imgUrl) return;
+
+//     const container = el.closest('article, div[class*="post"], div[class*="container"], div') || el.parentElement;
+
+//     if (predictionCache.has(imgUrl)) {
+//         const { prediction, confidence } = predictionCache.get(imgUrl);
+//         showOverlay(container, prediction, confidence);
+//         return;
+//     }
+
+async function processImageSmart(el, imgUrl) {
     if (!imgUrl) return;
 
     const container = el.closest('article, div[class*="post"], div[class*="container"], div') || el.parentElement;
@@ -106,6 +117,55 @@ function processImage(el, imgUrl) {
         showOverlay(container, prediction, confidence);
         return;
     }
+
+    try {
+        // 1. Try sending URL directly
+        const response = await fetch("http://127.0.0.1:5000/predict_url", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: imgUrl }),
+        });
+
+        if (!response.ok) throw new Error("URL fetch failed");
+
+        const data = await response.json();
+
+        let finalPrediction = data.prediction === "Real" ? "AI-generated" : "Real";
+        if (data.confidence < 0.5) finalPrediction = "AI-generated";
+
+        predictionCache.set(imgUrl, { prediction: finalPrediction, confidence: data.confidence });
+
+        console.log(` [PREDICTED via URL] ${imgUrl}`);
+        console.log(` → Prediction: ${finalPrediction}`);
+        console.log(` → Confidence: ${(data.confidence * 100).toFixed(2)}%`);
+
+        showOverlay(container, finalPrediction, data.confidence);
+
+    } catch (urlError) {
+        console.warn("⚠️ URL fetch failed, trying base64...", urlError);
+
+        // 2. Fallback to Base64
+        toDataURL(imgUrl, async (base64Data) => {
+            try {
+                const data = await fetchPrediction(base64Data);
+
+                let finalPrediction = data.prediction === "Real" ? "AI-generated" : "Real";
+                if (data.confidence < 0.5) finalPrediction = "AI-generated";
+
+                predictionCache.set(imgUrl, { prediction: finalPrediction, confidence: data.confidence });
+
+                console.log(` [PREDICTED via Base64] ${imgUrl}`);
+                console.log(` → Prediction: ${finalPrediction}`);
+                console.log(` → Confidence: ${(data.confidence * 100).toFixed(2)}%`);
+
+                showOverlay(container, finalPrediction, data.confidence);
+            } catch (base64Error) {
+                console.error(" Prediction failed (Base64 also failed):", base64Error);
+            }
+        });
+    }
+}
+
 
     toDataURL(imgUrl, async (base64Data) => {
         try {
