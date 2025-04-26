@@ -1,39 +1,9 @@
-//Resize the image
-function resizeAndConvertToBase64(url, callback) {
+function toDataURL(url, callback) {
     const xhr = new XMLHttpRequest();
     xhr.onload = function () {
         const reader = new FileReader();
         reader.onloadend = function () {
-            const img = new Image();
-            img.onload = function () {
-                const maxDimension = 512; //  Max width/height set karo
-
-                let width = img.width;
-                let height = img.height;
-
-                if (width > height) {
-                    if (width > maxDimension) {
-                        height *= maxDimension / width;
-                        width = maxDimension;
-                    }
-                } else {
-                    if (height > maxDimension) {
-                        width *= maxDimension / height;
-                        height = maxDimension;
-                    }
-                }
-
-                const canvas = document.createElement('canvas');
-                canvas.width = width;
-                canvas.height = height;
-
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, width, height);
-
-                const resizedBase64 = canvas.toDataURL('image/jpeg', 0.8); //  Quality compress bhi kar rahe 80%
-                callback(resizedBase64);
-            };
-            img.src = reader.result;
+            callback(reader.result);
         };
         reader.readAsDataURL(xhr.response);
     };
@@ -41,7 +11,6 @@ function resizeAndConvertToBase64(url, callback) {
     xhr.responseType = 'blob';
     xhr.send();
 }
-
 
 const loggedImages = new Set();
 
