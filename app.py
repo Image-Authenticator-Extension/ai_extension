@@ -47,7 +47,7 @@ def predict():
             confidence = torch.max(probs).item()
 
         return jsonify({
-            'prediction': 'AI-generated' if predicted_class == 1 else 'Real',
+            'prediction': 'AI' if predicted_class == 0 else 'Real',
             'confidence': confidence
         })
 
