@@ -34,9 +34,7 @@ style.textContent = `
     font-size: 10px;
     color: #fff;
 }
-
 `;
-
 document.head.appendChild(style);
 
 // ---- Caching and State ----
@@ -102,15 +100,8 @@ function updateOverlay(el, prediction, confidence) {
         el.appendChild(overlay);
     }
 
-    // Display loading text until prediction result is available
-    if (!predictionCache.has(el.dataset.imgUrl)) {
-        overlay.innerHTML = `<div class="loading-indicator">Loading...</div>`;
-    } else {
-        overlay.innerHTML = ` 
-            <div>${labelText}</div>
-            <button class="feedback-btn" title="Feedback">${feedbackSent.has(el.dataset.imgUrl) ? '✔️' : '👍 / 👎'}</button>
-        `;
-    }
+    // Update overlay content
+    overlay.innerHTML = `<div>${labelText}</div>`;
 
     // Applying a gradient background based on the prediction
     let gradientBackground = '';
@@ -123,17 +114,9 @@ function updateOverlay(el, prediction, confidence) {
     }
 
     overlay.style.background = gradientBackground;
-
-    overlay.querySelector('.feedback-btn').onclick = () => {
-        if (feedbackSent.has(el.dataset.imgUrl)) return;
-        sendFeedback(el.dataset.imgUrl, prediction, confidence, 'feedback');
-        feedbackSent.add(el.dataset.imgUrl);
-        overlay.querySelector('.feedback-btn').textContent = '✔️ Sent';
-    };
 }
 
-
-
+// Remove overlay
 function removeOverlay(el) {
     el.querySelector('.ai-label-overlay')?.remove();
 }
@@ -145,6 +128,16 @@ async function processImage(el, imgUrl) {
     inFlight.add(imgUrl);
     el.dataset.imgUrl = imgUrl;
 
+    // Show loading overlay
+    let overlay = el.querySelector('.ai-label-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'ai-label-overlay';
+        el.appendChild(overlay);
+    }
+    overlay.innerHTML = `<div class="loading-indicator">Loading...</div>`;
+    overlay.style.background = 'linear-gradient(145deg, rgba(100, 100, 100, 0.85), rgba(150, 150, 150, 0.85))';
+
     try {
         const base64 = await toDataURL(imgUrl);
 
@@ -154,6 +147,7 @@ async function processImage(el, imgUrl) {
         await new Promise((resolve) => { img.onload = resolve; });
         if (img.width < 100 || img.height < 100) {
             inFlight.delete(imgUrl);
+            removeOverlay(el);
             return;
         }
 
@@ -170,6 +164,7 @@ async function processImage(el, imgUrl) {
         updateOverlay(el, finalPred, confidence);
     } catch (e) {
         console.error("Prediction error:", e);
+        removeOverlay(el);
     } finally {
         inFlight.delete(imgUrl);
     }
