@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Insta Image Logger",
+  "name": "IsThisReal.AI",
   "version": "1.0",
   "permissions": ["scripting", "activeTab"],
   "host_permissions": ["http://127.0.0.1:5000/"],
@@ -10,8 +10,20 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "js": ["overlayManager.js","utils.js","predictionManager.js","content.js"],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["styles.css"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "icons": {
+    "16": "icon_16.png",
+    "48": "icon_48.png",
+    "128": "icon_128.png",
+    "256": "icon_256.png"
+  }
 }
