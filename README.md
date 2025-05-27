@@ -1,4 +1,4 @@
-# AI Extension - Image Authenticator
+# IsThisReal.AI – AI-Generated Image Detection Browser Extension
 
 Welcome to the **AI Extension - Image Authenticator** repository! This project provides a browser extension that leverages artificial intelligence to authenticate images, helping users verify the authenticity of images they encounter online.
 
@@ -38,7 +38,6 @@ Welcome to the **AI Extension - Image Authenticator** repository! This project p
 
 5. **Load the extension in your browser:**
    - For Chrome: Go to `chrome://extensions/`, enable "Developer mode", click "Load unpacked", and select the `build` directory.
-   - For Firefox: Go to `about:debugging#/runtime/this-firefox`, click "Load Temporary Add-on", and select the `manifest.json` file from the `build` directory.
 
 ## Usage
 
@@ -56,11 +55,6 @@ ai_extension/
 ├── package.json    # Project configuration and dependencies
 └── README.md       # This file
 ```
-
-## Contributing
-
-We welcome contributions! Please open issues or pull requests for bug fixes, enhancements, or suggestions. Make sure to follow the [Code of Conduct](CODE_OF_CONDUCT.md) and review our [Contributing Guidelines](CONTRIBUTING.md) if available.
-
 
 ## Contact
 
